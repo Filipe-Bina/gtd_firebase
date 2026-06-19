@@ -41,12 +41,18 @@ let authMode = "login";
 let adminTabActive = "solicitacoes";
 let unsubscribeListeners = [];
 
-// ── INICIALIZAÇÃO ──
+// ── INICIALIZAÇÃO CORRIGIDA ──
 onAuthStateChanged(auth, async (firebaseUser) => {
   if (firebaseUser) {
-    const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-    if (userDoc.exists()) {
-      session = { uid: firebaseUser.uid, ...userDoc.data() };
+    const emailPrefix = firebaseUser.email.split('@')[0];
+    const reFromEmail = emailPrefix.replace('re', '');
+    
+    const q = query(collection(db, "users"), where("re", "==", reFromEmail));
+    const snap = await getDocs(q);
+    
+    if (!snap.empty) {
+      const userDoc = snap.docs[0];
+      session = { uid: firebaseUser.uid, id: userDoc.id, ...userDoc.data() };
       render();
     } else {
       await signOut(auth);
@@ -132,7 +138,6 @@ async function handleLogin(e) {
   const msg = appEl.querySelector("#login-msg");
 
   try {
-    // Busca o email virtual gerado a partir do RE/CPF
     const whitelistRef = await findInWhitelist(re);
     if (!whitelistRef) { showMessage(msg, "error", "RE/CPF não autorizado ou não cadastrado."); return; }
     const email = reToEmail(re);
@@ -151,18 +156,15 @@ async function handleRegister(e) {
   if (password.length < 6) { showMessage(msg, "error", "A senha deve ter no mínimo 6 caracteres."); return; }
 
   try {
-    // Verifica whitelist
     const whitelistData = await findInWhitelist(re);
     if (!whitelistData) { showMessage(msg, "error", "RE/CPF não autorizado para cadastro."); return; }
 
-    // Verifica se já existe conta
     const existingUser = await findUserByRe(re);
     if (existingUser) { showMessage(msg, "error", "Este RE/CPF já possui cadastro. Faça login."); return; }
 
     const email = reToEmail(re);
     const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-    // Cria perfil do usuário no Firestore
     await setDoc(doc(db, "users", cred.user.uid), {
       re: re,
       name: whitelistData.name,
@@ -182,7 +184,6 @@ async function handleSelfReset(e) {
   e.preventDefault();
   const re = appEl.querySelector("#self-reset-re").value.trim().replace(/\D/g, "");
   const name = appEl.querySelector("#self-reset-name").value.trim().toUpperCase();
-  const newPassword = appEl.querySelector("#self-reset-password").value;
   const msg = appEl.querySelector("#self-reset-msg");
 
   try {
@@ -190,8 +191,7 @@ async function handleSelfReset(e) {
     if (!whitelistData) { showMessage(msg, "error", "RE/CPF não encontrado na base autorizada."); return; }
     if (whitelistData.name.toUpperCase() !== name) { showMessage(msg, "error", "Nome não confere com o cadastro."); return; }
 
-    // Re-autentica e atualiza senha via Firebase Auth
-    showMessage(msg, "ok", "Para redefinir sua senha, use a opção de recuperação por e-mail ou contate o administrador.");
+    showMessage(msg, "ok", "Para redefinir sua senha, contate o seu supervisor administrador.");
   } catch (err) {
     showMessage(msg, "error", err.message);
   }
@@ -203,12 +203,10 @@ function reToEmail(re) {
 }
 
 async function findInWhitelist(re) {
-  // Busca em allowed_technicians
   const techRef = doc(db, "allowed_technicians", re);
   const techDoc = await getDoc(techRef);
   if (techDoc.exists()) return { ...techDoc.data(), role: techDoc.data().role || "tecnico" };
 
-  // Busca em allowed_admins
   const adminRef = doc(db, "allowed_admins", re);
   const adminDoc = await getDoc(adminRef);
   if (adminDoc.exists()) {
@@ -472,7 +470,7 @@ function renderPdfView() {
   document.querySelector("#logout").addEventListener("click", doLogout);
 }
 
-// ══════════════ ÁREA DO ADMINISTRADOR ══════════════
+// ── ÁREA DO ADMINISTRADOR ──
 function renderAdminHome() {
   const isMaster = session.role === "administrador_master";
   appEl.innerHTML = `
@@ -551,7 +549,6 @@ async function renderAdminRequests() {
       `;
     }).join("")}</div>`;
 
-    // Attach eventos de resposta
     container.querySelectorAll("[data-respond]").forEach(btn => {
       btn.addEventListener("click", () => openRespondModal(btn.dataset.respond, btn.dataset.title));
     });
@@ -870,13 +867,11 @@ async function renderAdminUsers() {
 
       try {
         if (status === "cadastrado") {
-          // Atualiza role no users
           const userSnap = await getDocs(query(collection(db, "users"), where("re", "==", re)));
           if (!userSnap.empty) {
             await updateDoc(doc(db, "users", userSnap.docs[0].id), { role });
           }
         } else {
-          // Salva/atualiza whitelist
           if (role === "tecnico") {
             await setDoc(doc(db, "allowed_technicians", re), { re, name, role: "tecnico" });
           } else {

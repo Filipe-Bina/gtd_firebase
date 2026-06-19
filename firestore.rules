@@ -1,48 +1,13 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Usuários autenticados podem ler seu próprio perfil
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null;
-    }
-
-    // Whitelists — leitura pública (necessária para login/cadastro)
-    match /allowed_technicians/{re} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-
-    match /allowed_admins/{cpf} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-
-    // Solicitações
-    match /requests/{id} {
-      allow read, write: if request.auth != null;
-    }
-
-    // Scripts — leitura para autenticados
-    match /scripts/{id} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    // Escala de serviço
-    match /escala_servico/{id} {
-      allow read, write: if request.auth != null;
-    }
-
-    // Avisos
-    match /announcements/{id} {
-      allow read, write: if request.auth != null;
-    }
-
-    // Confirmações de leitura
-    match /announcement_acknowledgments/{id} {
-      allow read, write: if request.auth != null;
-    }
+    match /users/{userId} { allow read, create: if true; allow update, delete: if request.auth != null; }
+    match /allowed_technicians/{re} { allow read: if true; allow write: if request.auth != null; }
+    match /allowed_admins/{cpf} { allow read: if true; allow write: if request.auth != null; }
+    match /requests/{id} { allow read, write: if true; }
+    match /scripts/{id} { allow read: if true; allow write: if request.auth != null; }
+    match /escala_servico/{id} { allow read: if true; allow write: if request.auth != null; }
+    match /announcements/{id} { allow read, write: if true; }
+    match /announcement_acknowledgments/{id} { allow read, write: if true; }
   }
 }
