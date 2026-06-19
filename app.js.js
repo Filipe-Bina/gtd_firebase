@@ -41,21 +41,25 @@ let authMode = "login";
 let adminTabActive = "solicitacoes";
 let unsubscribeListeners = [];
 
-// ── INICIALIZAÇÃO CORRIGIDA ──
+// ── INICIALIZAÇÃO FIXA (BUSCA POR UID DO AUTH) ──
 onAuthStateChanged(auth, async (firebaseUser) => {
   if (firebaseUser) {
-    const emailPrefix = firebaseUser.email.split('@')[0];
-    const reFromEmail = emailPrefix.replace('re', '');
-    
-    const q = query(collection(db, "users"), where("re", "==", reFromEmail));
-    const snap = await getDocs(q);
-    
-    if (!snap.empty) {
-      const userDoc = snap.docs[0];
-      session = { uid: firebaseUser.uid, id: userDoc.id, ...userDoc.data() };
-      render();
-    } else {
-      await signOut(auth);
+    try {
+      // Busca as informações do perfil do usuário diretamente pelo UID do Firebase Auth
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      
+      if (userSnap.exists()) {
+        session = { uid: firebaseUser.uid, id: userSnap.id, ...userSnap.data() };
+        render();
+      } else {
+        // Fallback caso o registro Auth exista mas o Firestore correspondente falhe
+        await signOut(auth);
+        session = null;
+        renderAuth();
+      }
+    } catch (err) {
+      console.error("Erro na sessão:", err);
       session = null;
       renderAuth();
     }
@@ -81,7 +85,7 @@ function cancelListeners() {
   unsubscribeListeners = [];
 }
 
-// ── AUTH ──
+// ── AUTENTICAÇÃO COM E-MAIL REAL E SENHA ──
 function renderAuth() {
   appEl.innerHTML = `
     <section class="auth-shell">
@@ -94,29 +98,21 @@ function renderAuth() {
         <nav class="auth-tabs">
           <button class="tab-btn ${authMode === "login" ? "active" : ""}" id="tab-login">Login</button>
           <button class="tab-btn ${authMode === "register" ? "active" : ""}" id="tab-register">Primeiro Acesso</button>
-          <button class="tab-btn ${authMode === "reset" ? "active" : ""}" id="tab-reset">Esqueci a Senha</button>
         </nav>
         <div class="auth-forms-container">
           <form class="form auth-form ${authMode === "login" ? "show" : ""}" id="form-login">
-            <label>RE do Técnico ou CPF do Admin<input id="login-re" required inputmode="numeric" placeholder="Apenas números" /></label>
-            <label>Senha de Acesso<input id="login-password" type="password" required placeholder="Sua senha" /></label>
+            <label>E-mail Cadastrado<input id="login-email" type="email" required placeholder="Ex: seuemail@gtd.com" /></label>
+            <label>Senha<input id="login-password" type="password" required placeholder="Sua senha" /></label>
             <div class="message" id="login-msg"></div>
             <button class="primary-btn" type="submit">Entrar no Sistema</button>
           </form>
           <form class="form auth-form ${authMode === "register" ? "show" : ""}" id="form-register">
-            <p class="helper">Informe seu RE ou CPF pré-autorizado para criar seu acesso.</p>
-            <label>RE ou CPF Autorizado<input id="register-re" required inputmode="numeric" placeholder="Apenas números" /></label>
-            <label>Crie sua Senha (mín. 6 caracteres)<input id="register-password" type="password" required placeholder="Ex: gtd2026x" /></label>
+            <p class="helper">Insira seu RE/CPF autorizado para validar a conta e escolha seu e-mail pessoal ou corporativo válido.</p>
+            <label>RE ou CPF Autorizado<input id="register-re" required inputmode="numeric" placeholder="Apenas números da sua lista" /></label>
+            <label>E-mail Pessoal ou de Trabalho<input id="register-email" type="email" required placeholder="Ex: felipe@provedor.com" /></label>
+            <label>Crie sua Senha (mín. 6 caracteres)<input id="register-password" type="password" required placeholder="Crie uma nova senha" /></label>
             <div class="message" id="register-msg"></div>
             <button class="primary-btn" type="submit">Cadastrar e Ativar</button>
-          </form>
-          <form class="form auth-form ${authMode === "reset" ? "show" : ""}" id="form-reset">
-            <p class="helper" style="color:#b45309;">Informe seu RE/CPF e nome para redefinir sua senha.</p>
-            <label>RE ou CPF<input id="self-reset-re" required inputmode="numeric" placeholder="Apenas números" /></label>
-            <label>Nome Completo<input id="self-reset-name" required placeholder="Como está registrado" /></label>
-            <label>Nova Senha<input id="self-reset-password" type="password" required placeholder="Mín. 6 caracteres" /></label>
-            <div class="message" id="self-reset-msg"></div>
-            <button class="primary-btn" type="submit" style="background:#d97706;">Gravar Nova Senha</button>
           </form>
         </div>
       </div>
@@ -125,83 +121,67 @@ function renderAuth() {
 
   appEl.querySelector("#tab-login").addEventListener("click", () => { authMode = "login"; renderAuth(); });
   appEl.querySelector("#tab-register").addEventListener("click", () => { authMode = "register"; renderAuth(); });
-  appEl.querySelector("#tab-reset").addEventListener("click", () => { authMode = "reset"; renderAuth(); });
   appEl.querySelector("#form-login").addEventListener("submit", handleLogin);
   appEl.querySelector("#form-register").addEventListener("submit", handleRegister);
-  appEl.querySelector("#form-reset").addEventListener("submit", handleSelfReset);
 }
 
 async function handleLogin(e) {
   e.preventDefault();
-  const re = appEl.querySelector("#login-re").value.trim().replace(/\D/g, "");
+  const email = appEl.querySelector("#login-email").value.trim();
   const password = appEl.querySelector("#login-password").value;
   const msg = appEl.querySelector("#login-msg");
 
   try {
-    const whitelistRef = await findInWhitelist(re);
-    if (!whitelistRef) { showMessage(msg, "error", "RE/CPF não autorizado ou não cadastrado."); return; }
-    const email = reToEmail(re);
     await signInWithEmailAndPassword(auth, email, password);
   } catch (err) {
-    showMessage(msg, "error", err.code === "auth/invalid-credential" ? "RE/CPF ou senha inválidos." : err.message);
+    let errorMsg = "E-mail ou senha inválidos.";
+    if (err.code === "auth/invalid-email") errorMsg = "Formato de e-mail inválido.";
+    if (err.code === "auth/user-not-found") errorMsg = "Usuário não cadastrado.";
+    showMessage(msg, "error", errorMsg);
   }
 }
 
 async function handleRegister(e) {
   e.preventDefault();
   const re = appEl.querySelector("#register-re").value.trim().replace(/\D/g, "");
+  const email = appEl.querySelector("#register-email").value.trim();
   const password = appEl.querySelector("#register-password").value;
   const msg = appEl.querySelector("#register-msg");
 
   if (password.length < 6) { showMessage(msg, "error", "A senha deve ter no mínimo 6 caracteres."); return; }
 
   try {
+    // 1. Valida se o RE está pré-autorizado nas listas do banco (Whitelist)
     const whitelistData = await findInWhitelist(re);
-    if (!whitelistData) { showMessage(msg, "error", "RE/CPF não autorizado para cadastro."); return; }
+    if (!whitelistData) { showMessage(msg, "error", "RE/CPF não autorizado para cadastro na empresa."); return; }
 
+    // 2. Garante que esse RE já não está em uso por outra conta
     const existingUser = await findUserByRe(re);
-    if (existingUser) { showMessage(msg, "error", "Este RE/CPF já possui cadastro. Faça login."); return; }
+    if (existingUser) { showMessage(msg, "error", "Este RE/CPF já está vinculado a uma conta ativa."); return; }
 
-    const email = reToEmail(re);
+    // 3. Cria o usuário no Firebase Auth usando e-mail real escolhido pelo técnico
     const cred = await createUserWithEmailAndPassword(auth, email, password);
 
+    // 4. Salva o perfil do usuário usando o UID do Auth como ID do documento
     await setDoc(doc(db, "users", cred.user.uid), {
       re: re,
+      email: email,
       name: whitelistData.name,
       role: whitelistData.role || "tecnico",
       created_at: serverTimestamp()
     });
 
-    alert("Cadastro efetuado com sucesso! Faça login.");
+    alert("Acesso criado com sucesso! Use seu e-mail e senha cadastrados para entrar.");
     authMode = "login";
     renderAuth();
   } catch (err) {
-    showMessage(msg, "error", err.message);
+    let errText = err.message;
+    if (err.code === "auth/email-already-in-use") errText = "Este e-mail já está sendo utilizado em outra conta.";
+    showMessage(msg, "error", errText);
   }
 }
 
-async function handleSelfReset(e) {
-  e.preventDefault();
-  const re = appEl.querySelector("#self-reset-re").value.trim().replace(/\D/g, "");
-  const name = appEl.querySelector("#self-reset-name").value.trim().toUpperCase();
-  const msg = appEl.querySelector("#self-reset-msg");
-
-  try {
-    const whitelistData = await findInWhitelist(re);
-    if (!whitelistData) { showMessage(msg, "error", "RE/CPF não encontrado na base autorizada."); return; }
-    if (whitelistData.name.toUpperCase() !== name) { showMessage(msg, "error", "Nome não confere com o cadastro."); return; }
-
-    showMessage(msg, "ok", "Para redefinir sua senha, contate o seu supervisor administrador.");
-  } catch (err) {
-    showMessage(msg, "error", err.message);
-  }
-}
-
-// ── HELPERS FIREBASE ──
-function reToEmail(re) {
-  return `re${re}@gtdability.internal`;
-}
-
+// ── HELPERS DE CONEXÃO E WHITELIST ──
 async function findInWhitelist(re) {
   const techRef = doc(db, "allowed_technicians", re);
   const techDoc = await getDoc(techRef);
@@ -232,7 +212,7 @@ function topbar() {
         <div class="app-title"><span class="mini-mark">GTD</span> Ability Tecnologia</div>
         <div class="user-chip">
           <strong>${escapeHtml(session.name)}</strong>
-          <span>ID: ${escapeHtml(session.re)} • ${escapeHtml(displayRole)}</span>
+          <span>RE: ${escapeHtml(session.re)} • ${escapeHtml(displayRole)}</span>
           <button class="ghost-btn" id="logout" style="width:auto;padding:4px 8px;">Sair</button>
         </div>
       </div>
