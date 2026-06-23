@@ -7,7 +7,7 @@ import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collec
 
 // ── Firebase config ──────────────────────────────────────────
 const firebaseConfig = {
-  apiKey: "AIzaSyDFbEkQh9iQ0NlQB4bRUQ2jeBa36HMJ5ss",
+  apiKey: "AIzaSyDvUxxXl3EDwNNXMbVzEn7IAO4MfbnnN_A",
   authDomain: "gtd-ability-tecnologia.firebaseapp.com",
   projectId: "gtd-ability-tecnologia",
   storageBucket: "gtd-ability-tecnologia.firebasestorage.app",
